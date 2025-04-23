@@ -144,12 +144,8 @@ async def on_shutdown():
     await telegram_app.stop()
     await telegram_app.shutdown()
 
-@app.post("/webhook")
-async def telegram_webhook(request: Request):
-    data = await request.json()
-    update = Update.de_json(data, telegram_app.bot)
-    await telegram_app.process_update(update)
-    return {"ok": True}
+app.post("/webhook")(get_webhook_handler(telegram_app))
+
 
 @app.api_route("/", methods=["GET", "HEAD"])
 async def root(request: Request):
