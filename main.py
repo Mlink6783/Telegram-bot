@@ -10,46 +10,47 @@ from telegram.ext import (
     ContextTypes,
     filters,
     Defaults,
-    Application,
 )
+from telegram.ext import Application
 
-# --- Load ENV variables ---
+# --- ENV ---
 TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "857216172"))
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
-# --- Setup ---
-waiting_users = []
-active_chats = {}
-all_users = set()
-
+# --- App setup ---
 app = FastAPI()
 defaults = Defaults(parse_mode="HTML")
 telegram_app: Application = ApplicationBuilder().token(TOKEN).defaults(defaults).build()
 
-# --- Helpers ---
+# --- State ---
+waiting_users = []
+active_chats = {}
+all_users = set()
+
+# --- Helper ---
 def is_clean_text(message):
-    if message.text:
-        return not re.search(r'https?://|t\.me|www\.', message.text)
-    return False
+    return message.text and not re.search(r'https?://|t\.me|www\.', message.text)
 
-async def update_menu(user_id, in_chat=False):
-    commands = [
-        BotCommand("start", "🔁 Find a match"),
-        BotCommand("next", "⏭️ Skip current match"),
-    ]
+async def update_menu(user_id: int, in_chat: bool):
     if in_chat:
-        commands.append(BotCommand("end", "❌ End chat"))
-
+        commands = [
+            BotCommand("next", "⏭️ Skip current match"),
+            BotCommand("end", "❌ End chat"),
+        ]
+    else:
+        commands = [
+            BotCommand("start", "🔁 Find a match"),
+        ]
     await telegram_app.bot.set_my_commands(commands, scope=BotCommandScopeDefault())
 
-# --- Commands ---
+# --- Handlers ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     all_users.add(user_id)
 
     if user_id in active_chats:
-        await context.bot.send_message(chat_id=user_id, text="⚠️ You're already in a chat. Use /next or /end.")
+        await context.bot.send_message(chat_id=user_id, text="You are already in a chat. Use /next or /end.")
         return
 
     if user_id in waiting_users:
@@ -60,12 +61,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         partner_id = waiting_users.pop(0)
         active_chats[user_id] = partner_id
         active_chats[partner_id] = user_id
+
         await update_menu(user_id, in_chat=True)
         await update_menu(partner_id, in_chat=True)
+
         await context.bot.send_message(chat_id=user_id, text="🎉 Matched!")
         await context.bot.send_message(chat_id=partner_id, text="🎉 Matched!")
     else:
         waiting_users.append(user_id)
+        await update_menu(user_id, in_chat=False)
         await context.bot.send_message(chat_id=user_id, text="⏳ Waiting for a match...")
 
 async def next_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -76,11 +80,11 @@ async def next_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
         active_chats.pop(partner_id, None)
         await update_menu(user_id, in_chat=False)
         await update_menu(partner_id, in_chat=False)
-        await context.bot.send_message(chat_id=partner_id, text="❌ Partner left. Use /start to match again.")
-        await context.bot.send_message(chat_id=user_id, text="✅ Left the chat. Finding a new match...")
+        await context.bot.send_message(chat_id=partner_id, text="❌ Partner left. Use /start again.")
+        await context.bot.send_message(chat_id=user_id, text="✅ Left the chat. Matching again...")
         await start(update, context)
     else:
-        await context.bot.send_message(chat_id=user_id, text="⚠️ You're not in a chat. Use /start.")
+        await context.bot.send_message(chat_id=user_id, text="⚠️ Not in a chat. Use /start.")
 
 async def end_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -93,7 +97,8 @@ async def end_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(chat_id=partner_id, text="❌ Your partner ended the chat.")
         await context.bot.send_message(chat_id=user_id, text="✅ Chat ended. Use /start again.")
     else:
-        await context.bot.send_message(chat_id=user_id, text="⚠️ You're not in a chat.")
+        await update_menu(user_id, in_chat=False)
+        await context.bot.send_message(chat_id=user_id, text="⚠️ Not in a chat.")
 
 async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
@@ -111,25 +116,22 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
             count += 1
         except:
             continue
-
     await update.message.reply_text(f"✅ Broadcast sent to {count} users.")
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         await update.message.reply_text("❌ Not authorized.")
         return
-
     await update.message.reply_text(
         f"📊 Users: {len(all_users)}\nActive: {len(active_chats)}\nWaiting: {len(waiting_users)}"
     )
 
-# --- Message Forwarding ---
 async def forward_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     partner_id = active_chats.get(user_id)
 
     if not partner_id:
-        await context.bot.send_message(chat_id=user_id, text="⚠️ Use /start to find a match.")
+        await context.bot.send_message(chat_id=user_id, text="⚠️ Use /start to match.")
         return
 
     if is_clean_text(update.message):
@@ -145,12 +147,12 @@ telegram_app.add_handler(CommandHandler("broadcast", broadcast))
 telegram_app.add_handler(CommandHandler("stats", stats))
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, forward_message))
 
-# --- FastAPI Startup / Webhook ---
+# --- Webhook Setup ---
 @app.on_event("startup")
 async def on_startup():
     await telegram_app.initialize()
     await telegram_app.bot.set_webhook(WEBHOOK_URL)
-    await update_menu(user_id=None, in_chat=False)  # Set global menu
+    await update_menu(user_id=ADMIN_ID, in_chat=False)
     await telegram_app.start()
 
 @app.on_event("shutdown")
