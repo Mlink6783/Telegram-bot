@@ -137,6 +137,10 @@ async def handle_webhook(request: Request):
     await telegram_app.process_update(update)
     return {"ok": True}
 
+@app.get("/")
+def read_root():
+    return {"message": "Bot is running"}
+
 # For local dev (or fallback in Render)
 if __name__ == "__main__":
     import uvicorn
