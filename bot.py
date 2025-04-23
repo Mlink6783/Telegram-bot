@@ -58,7 +58,7 @@ async def next_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
         partner_id = active_chats.pop(user_id)
         active_chats.pop(partner_id, None)
 
-        await context.bot.send_message(chat_id=partner_id, text="❌ Your match left the chat.", reply_markup=get_start_keyboard())
+        await context.bot.send_message(chat_id=partner_id, text="❌ Your match left the chat.")
         await context.bot.send_message(chat_id=user_id, text="✅ You left the chat. Please wait for a new match.")
 
         if waiting_users:
@@ -74,7 +74,7 @@ async def next_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await context.bot.send_message(chat_id=user_id, text="⚠️ You are not in a chat. Use /start to begin.")
 
-# /end command handler
+# /end command handler (new feature to exit chat)
 async def end_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
 
@@ -82,7 +82,7 @@ async def end_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
         partner_id = active_chats.pop(user_id)
         active_chats.pop(partner_id, None)
 
-        await context.bot.send_message(chat_id=partner_id, text="❌ Your match left the chat.", reply_markup=get_start_keyboard())
+        await context.bot.send_message(chat_id=partner_id, text="❌ Your match left the chat.")
         await context.bot.send_message(chat_id=user_id, text="✅ You left the chat and exited the queue.", reply_markup=get_start_keyboard())
     else:
         await context.bot.send_message(chat_id=user_id, text="⚠️ You are not in a chat. Use /start to begin.", reply_markup=get_start_keyboard())
@@ -160,10 +160,10 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("next", next_chat))
-    app.add_handler(CommandHandler("end", end_chat))
+    app.add_handler(CommandHandler("end", end_chat))  # Register the /end command
     app.add_handler(CommandHandler("broadcast", broadcast))
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, forward_message))
-    app.add_handler(CallbackQueryHandler(button_handler))
+    app.add_handler(CallbackQueryHandler(button_handler))  # Handle button presses
 
     print("🤖 Bot is running...")
     app.run_polling()
