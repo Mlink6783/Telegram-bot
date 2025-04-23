@@ -1,7 +1,7 @@
 import os
 import re
-from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from telegram import Update, BotCommand
 from telegram.ext import (
     ApplicationBuilder,
@@ -11,28 +11,29 @@ from telegram.ext import (
     filters,
     Defaults,
 )
+from telegram.ext import Application
 
-
+# --- Load ENV variables ---
 TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "857216172"))
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
-# Global state
+# --- Setup ---
 waiting_users = []
 active_chats = {}
 all_users = set()
 
-# Telegram app instance
+app = FastAPI()
 defaults = Defaults(parse_mode="HTML")
-telegram_app = ApplicationBuilder().token(TOKEN).defaults(defaults).build()
+telegram_app: Application = ApplicationBuilder().token(TOKEN).defaults(defaults).build()
 
-# Helper function
+# --- Helper ---
 def is_clean_text(message):
     if message.text:
         return not re.search(r'https?://|t\.me|www\.', message.text)
     return False
 
-# --- Command Handlers ---
+# --- Commands ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     all_users.add(user_id)
@@ -126,25 +127,30 @@ telegram_app.add_handler(CommandHandler("broadcast", broadcast))
 telegram_app.add_handler(CommandHandler("stats", stats))
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, forward_message))
 
-# --- FastAPI Setup ---
-@asynccontextmanager
-async def lifespan(app: FastAPI):
+# --- Startup & Webhook ---
+@app.on_event("startup")
+async def on_startup():
+    await telegram_app.initialize()
     await telegram_app.bot.set_webhook(WEBHOOK_URL)
     await telegram_app.bot.set_my_commands([
         BotCommand("start", "🔁 Find a match"),
         BotCommand("next", "⏭️ Skip current match"),
         BotCommand("end", "❌ End chat"),
     ])
-    yield
+    await telegram_app.start()
 
-app = FastAPI(lifespan=lifespan)
+@app.on_event("shutdown")
+async def on_shutdown():
+    await telegram_app.stop()
+    await telegram_app.shutdown()
 
-# Webhook handler route
 @app.post("/webhook")
-async def telegram_webhook(update: dict):
-    await telegram_app.update_queue.put(Update.de_json(update, telegram_app.bot))
+async def telegram_webhook(request: Request):
+    data = await request.json()
+    update = Update.de_json(data, telegram_app.bot)
+    await telegram_app.process_update(update)
     return {"ok": True}
 
-@app.get("/")
-async def root():
-    return {"status": "Bot is running"}
+@app.api_route("/", methods=["GET", "HEAD"])
+async def root(request: Request):
+    return JSONResponse(content={"status": "Bot is running"})
