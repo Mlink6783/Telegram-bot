@@ -1,32 +1,32 @@
 import os
 import re
-from fastapi import FastAPI, Request
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
 from telegram import Update, BotCommand
 from telegram.ext import (
-    Application,
+    ApplicationBuilder,
     CommandHandler,
     MessageHandler,
     ContextTypes,
     filters,
     Defaults,
 )
-import asyncio
+from telegram.ext.webhook import WebhookServer
 
 TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "857216172"))
-WEBHOOK_PATH = "/webhook"
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
-app = FastAPI()
-defaults = Defaults(parse_mode="HTML")
-
-telegram_app = Application.builder().token(TOKEN).defaults(defaults).build()
-
+# Global state
 waiting_users = []
 active_chats = {}
 all_users = set()
 
-# --- Helper Functions ---
+# Telegram app instance
+defaults = Defaults(parse_mode="HTML")
+telegram_app = ApplicationBuilder().token(TOKEN).defaults(defaults).build()
+
+# Helper function
 def is_clean_text(message):
     if message.text:
         return not re.search(r'https?://|t\.me|www\.', message.text)
@@ -126,18 +126,21 @@ telegram_app.add_handler(CommandHandler("broadcast", broadcast))
 telegram_app.add_handler(CommandHandler("stats", stats))
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, forward_message))
 
-@app.post(WEBHOOK_PATH)
-async def telegram_webhook(request: Request):
-    data = await request.json()
-    update = Update.de_json(data, telegram_app.bot)
-    await telegram_app.process_update(update)
-    return {"ok": True}
-
-@app.on_event("startup")
-async def startup():
+# --- FastAPI Setup ---
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     await telegram_app.bot.set_webhook(WEBHOOK_URL)
     await telegram_app.bot.set_my_commands([
         BotCommand("start", "🔁 Find a match"),
         BotCommand("next", "⏭️ Skip current match"),
         BotCommand("end", "❌ End chat"),
     ])
+    yield
+
+app = FastAPI(lifespan=lifespan)
+
+# Webhook handler route
+@app.post("/webhook")
+async def telegram_webhook(update: dict):
+    await telegram_app.update_queue.put(Update.de_json(update, telegram_app.bot))
+    return {"ok": True}
