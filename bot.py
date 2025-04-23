@@ -1,6 +1,6 @@
 import os
 import re
-from telegram import Update
+from telegram import Update, BotCommand
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -9,17 +9,14 @@ from telegram.ext import (
     filters,
 )
 
-# Admin ID
+# Admin ID set here
 ADMIN_ID = 857216172
-
-# Data stores
 waiting_users = []
 active_chats = {}
 
-# /start command
+# /start command handler
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-
     if user_id in active_chats:
         await context.bot.send_message(chat_id=user_id, text="You are already in a chat. Use /next to get a new match.")
         return
@@ -39,7 +36,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         waiting_users.append(user_id)
         await context.bot.send_message(chat_id=user_id, text="⏳ Please wait while we find your match...")
 
-# /next command
+# /next command handler
 async def next_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
 
@@ -63,52 +60,46 @@ async def next_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await context.bot.send_message(chat_id=user_id, text="⚠️ You are not in a chat. Use /start to begin.")
 
-# /end command
-async def end_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-
-    if user_id in active_chats:
-        partner_id = active_chats.pop(user_id)
-        active_chats.pop(partner_id, None)
-        await context.bot.send_message(chat_id=partner_id, text="❌ Your match left the chat.")
-        await context.bot.send_message(chat_id=user_id, text="✅ You left the chat.")
-    elif user_id in waiting_users:
-        waiting_users.remove(user_id)
-        await context.bot.send_message(chat_id=user_id, text="✅ You left the queue.")
-    else:
-        await context.bot.send_message(chat_id=user_id, text="⚠️ You are not in a chat or queue.")
-
-# /broadcast command (admin only)
+# /broadcast for admin — allows any type of message
 async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id != ADMIN_ID:
         await update.message.reply_text("❌ You are not authorized to use this command.")
         return
 
-    if not context.args:
-        await update.message.reply_text("📢 Please provide a message after /broadcast command.")
+    if not update.message.reply_to_message:
+        await update.message.reply_text("📢 Reply to the message you want to broadcast.")
         return
 
-    message = " ".join(context.args)
     count = 0
+    targets = set(active_chats.keys()).union(set(waiting_users))
 
-    all_users = set(active_chats.keys()).union(set(waiting_users))
-    for uid in all_users:
+    for uid in targets:
         try:
-            await context.bot.send_message(chat_id=uid, text=f"📢 Admin Broadcast:\n{message}")
+            await update.message.reply_to_message.copy(chat_id=uid)
             count += 1
         except:
             continue
 
-    await update.message.reply_text(f"✅ Broadcast message sent to {count} users.")
+    await update.message.reply_text(f"✅ Broadcast sent to {count} users.")
 
-# Message filter: plain text only, no links
+# /stats command for admin to show total number of users
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id != ADMIN_ID:
+        await update.message.reply_text("❌ You are not authorized to use this command.")
+        return
+
+    total_users = len(active_chats) + len(waiting_users)
+    await update.message.reply_text(f"📊 Total Users: {total_users}\nActive Chats: {len(active_chats)}\nWaiting Users: {len(waiting_users)}")
+
+# Text filtering: only clean plain text
 def is_clean_text(message):
     if message.text:
         return not re.search(r'https?://|t\.me|www\.', message.text)
     return False
 
-# Forwarding only clean text messages
+# Forward plain messages (no link/media)
 async def forward_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     partner_id = active_chats.get(user_id)
@@ -122,7 +113,7 @@ async def forward_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await context.bot.send_message(chat_id=user_id, text="🚫 Only plain text messages are allowed. No links, media, or files.")
 
-# Start the bot
+# Main bot function
 def main():
     TOKEN = os.getenv("BOT_TOKEN")
     if not TOKEN:
@@ -133,9 +124,19 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("next", next_chat))
-    app.add_handler(CommandHandler("end", end_chat))
     app.add_handler(CommandHandler("broadcast", broadcast))
+    app.add_handler(CommandHandler("stats", stats))  # Admin stats command
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, forward_message))
+
+    # Add persistent command menu
+    async def setup_commands():
+        commands = [
+            BotCommand("start", "🔁 Find a match"),
+            BotCommand("next", "⏭️ Skip current match"),
+        ]
+        await app.bot.set_my_commands(commands)
+
+    app.post_init = setup_commands
 
     print("🤖 Bot is running...")
     app.run_polling()
