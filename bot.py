@@ -184,36 +184,8 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, forward_message))
 
     print("🤖 Bot is running...")
-    async def main():
-    TOKEN = os.getenv("BOT_TOKEN")
-    WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # e.g., "https://yourapp.onrender.com/webhook"
-    PORT = int(os.environ.get("PORT", 8443))
+    app.run_polling()
 
-    app = ApplicationBuilder().token(TOKEN).build()
-
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("next", next_chat))
-    app.add_handler(CommandHandler("end", end_chat))
-    app.add_handler(CommandHandler("broadcast", broadcast))
-    app.add_handler(CommandHandler("stats", stats))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, forward_message))
-
-    async def setup_commands(bot):
-        commands = [
-            BotCommand("start", "🔁 Find a match"),
-            BotCommand("next", "⏭️ Skip current match"),
-            BotCommand("end", "❌ Leave current chat"),
-        ]
-        await bot.set_my_commands(commands)
-
-    await setup_commands(app.bot)
-    await app.bot.set_webhook(url=WEBHOOK_URL)
-    await app.run_webhook(
-        listen="0.0.0.0",
-        port=PORT,
-        webhook_url=WEBHOOK_URL,
-    )
 
 if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
+    main()
