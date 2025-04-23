@@ -155,6 +155,12 @@ async def on_startup():
     await update_menu(user_id=ADMIN_ID, in_chat=False)
     await telegram_app.start()
 
+@app.on_event("shutdown")
+async def on_shutdown():
+   await telegram_app.initialize()
+    await telegram_app.bot.set_webhook(WEBHOOK_URL)
+    await update_menu(user_id=ADMIN_ID, in_chat=False)
+    await telegram_app.start()
 
 @app.post("/webhook")
 async def telegram_webhook(request: Request):
