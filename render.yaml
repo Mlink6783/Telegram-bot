@@ -11,4 +11,4 @@ services:
       - key: ADMIN_ID
         value: "857216172"
       - key: WEBHOOK_URL
-        value: "https://telegram-bot-l5om.onrender.com/webhook"
+        value: https://telegram-bot-l5om.onrender.com/webhook
