@@ -1,10 +1,11 @@
 import os
-from telegram import Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     MessageHandler,
     ContextTypes,
+    CallbackQueryHandler,
     filters,
 )
 
@@ -109,6 +110,27 @@ async def forward_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await context.bot.send_message(chat_id=user_id, text="⚠️ You are not in a chat. Use /start to begin.")
 
+# Button for /start command
+async def start_with_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [
+        [
+            InlineKeyboardButton("Match Me", callback_data='match'),
+            InlineKeyboardButton("Next", callback_data='next')
+        ],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text("Welcome to the Random Match Bot! Please choose an option:", reply_markup=reply_markup)
+
+# Button callback handler
+async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    if query.data == 'match':
+        await query.edit_message_text(text="🎉 You have a new match!")
+    elif query.data == 'next':
+        await query.edit_message_text(text="🔄 Searching for a new match...")
+
 # Main function to run the bot
 def main():
     TOKEN = os.getenv("BOT_TOKEN")
@@ -118,10 +140,11 @@ def main():
 
     app = ApplicationBuilder().token(TOKEN).build()
 
-    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("start", start_with_button))
     app.add_handler(CommandHandler("next", next_chat))
     app.add_handler(CommandHandler("broadcast", broadcast))
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, forward_message))
+    app.add_handler(CallbackQueryHandler(button))  # Handling button presses
 
     print("🤖 Bot is running...")
     app.run_polling()
