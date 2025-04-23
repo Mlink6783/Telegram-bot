@@ -1,34 +1,38 @@
 import os
 import re
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from telegram import Update, BotCommand
 from telegram.ext import (
-    ApplicationBuilder,
+    Application,
     CommandHandler,
     MessageHandler,
     ContextTypes,
     filters,
     Defaults,
 )
-from telegram.ext.fastapi_handler import get_webhook_handler
+import asyncio
 
 TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "857216172"))
+WEBHOOK_PATH = "/webhook"
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+
+app = FastAPI()
+defaults = Defaults(parse_mode="HTML")
+
+telegram_app = Application.builder().token(TOKEN).defaults(defaults).build()
 
 waiting_users = []
 active_chats = {}
 all_users = set()
 
-app = FastAPI()
-defaults = Defaults(parse_mode="HTML")
-telegram_app = ApplicationBuilder().token(TOKEN).defaults(defaults).build()
-
+# --- Helper Functions ---
 def is_clean_text(message):
     if message.text:
         return not re.search(r'https?://|t\.me|www\.', message.text)
     return False
 
+# --- Command Handlers ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     all_users.add(user_id)
@@ -100,6 +104,7 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📊 Users: {len(all_users)}\nActive: {len(active_chats)}\nWaiting: {len(waiting_users)}"
     )
 
+# --- Message Forwarding ---
 async def forward_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     partner_id = active_chats.get(user_id)
@@ -113,6 +118,7 @@ async def forward_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await context.bot.send_message(chat_id=user_id, text="🚫 Only plain text allowed.")
 
+# --- Register Handlers ---
 telegram_app.add_handler(CommandHandler("start", start))
 telegram_app.add_handler(CommandHandler("next", next_chat))
 telegram_app.add_handler(CommandHandler("end", end_chat))
@@ -120,13 +126,18 @@ telegram_app.add_handler(CommandHandler("broadcast", broadcast))
 telegram_app.add_handler(CommandHandler("stats", stats))
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, forward_message))
 
+@app.post(WEBHOOK_PATH)
+async def telegram_webhook(request: Request):
+    data = await request.json()
+    update = Update.de_json(data, telegram_app.bot)
+    await telegram_app.process_update(update)
+    return {"ok": True}
+
 @app.on_event("startup")
-async def on_start():
+async def startup():
     await telegram_app.bot.set_webhook(WEBHOOK_URL)
     await telegram_app.bot.set_my_commands([
         BotCommand("start", "🔁 Find a match"),
         BotCommand("next", "⏭️ Skip current match"),
         BotCommand("end", "❌ End chat"),
     ])
-
-app.post("/webhook")(get_webhook_handler(telegram_app))
