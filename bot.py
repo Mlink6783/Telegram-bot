@@ -129,14 +129,14 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, forward_message))
 
     # Add persistent command menu
-    async def setup_commands():
+    async def setup_commands(self):
         commands = [
             BotCommand("start", "🔁 Find a match"),
             BotCommand("next", "⏭️ Skip current match"),
         ]
-        await app.bot.set_my_commands(commands)
+        await self.bot.set_my_commands(commands)
 
-    app.post_init = setup_commands
+    app.post_init = setup_commands  # Assign the function to the post_init attribute
 
     print("🤖 Bot is running...")
     app.run_polling()
