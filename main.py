@@ -1,7 +1,7 @@
-# main.py
 import os
 import re
 from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from telegram import Update, BotCommand
 from telegram.ext import (
     ApplicationBuilder,
@@ -11,48 +11,50 @@ from telegram.ext import (
     filters,
     Defaults,
 )
+from telegram.ext import Application
 
+# --- Load ENV variables ---
 TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "857216172"))
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
+# --- Setup ---
 waiting_users = []
 active_chats = {}
 all_users = set()
 
 app = FastAPI()
 defaults = Defaults(parse_mode="HTML")
-telegram_app = ApplicationBuilder().token(TOKEN).defaults(defaults).build()
+telegram_app: Application = ApplicationBuilder().token(TOKEN).defaults(defaults).build()
 
-# Helper
-
+# --- Helper ---
 def is_clean_text(message):
     if message.text:
-        return not re.search(r'https?://|t\\.me|www\\.', message.text)
+        return not re.search(r'https?://|t\.me|www\.', message.text)
     return False
 
-# Commands
+# --- Commands ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     all_users.add(user_id)
 
     if user_id in active_chats:
-        await update.message.reply_text("You are already in a chat. Use /next or /end.")
+        await context.bot.send_message(chat_id=user_id, text="You are already in a chat. Use /next or /end.")
         return
 
     if user_id in waiting_users:
-        await update.message.reply_text("⏳ Waiting for a match...")
+        await context.bot.send_message(chat_id=user_id, text="⏳ Waiting for a match...")
         return
 
     if waiting_users:
         partner_id = waiting_users.pop(0)
         active_chats[user_id] = partner_id
         active_chats[partner_id] = user_id
-        await context.bot.send_message(user_id, "🎉 Matched!")
-        await context.bot.send_message(partner_id, "🎉 Matched!")
+        await context.bot.send_message(chat_id=user_id, text="🎉 Matched!")
+        await context.bot.send_message(chat_id=partner_id, text="🎉 Matched!")
     else:
         waiting_users.append(user_id)
-        await update.message.reply_text("⏳ Waiting for a match...")
+        await context.bot.send_message(chat_id=user_id, text="⏳ Waiting for a match...")
 
 async def next_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -60,11 +62,11 @@ async def next_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if partner_id:
         active_chats.pop(partner_id, None)
-        await context.bot.send_message(partner_id, "❌ Partner left. Use /start again.")
-        await context.bot.send_message(user_id, "✅ Left the chat. Matching again...")
+        await context.bot.send_message(chat_id=partner_id, text="❌ Partner left. Use /start again.")
+        await context.bot.send_message(chat_id=user_id, text="✅ Left the chat. Matching again...")
         await start(update, context)
     else:
-        await update.message.reply_text("⚠️ Not in a chat. Use /start.")
+        await context.bot.send_message(chat_id=user_id, text="⚠️ Not in a chat. Use /start.")
 
 async def end_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -72,17 +74,19 @@ async def end_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if partner_id:
         active_chats.pop(partner_id, None)
-        await context.bot.send_message(partner_id, "❌ Your partner ended the chat.")
-        await update.message.reply_text("✅ Chat ended. Use /start again.")
+        await context.bot.send_message(chat_id=partner_id, text="❌ Your partner ended the chat.")
+        await context.bot.send_message(chat_id=user_id, text="✅ Chat ended. Use /start again.")
     else:
-        await update.message.reply_text("⚠️ Not in a chat.")
+        await context.bot.send_message(chat_id=user_id, text="⚠️ Not in a chat.")
 
 async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
-        return await update.message.reply_text("❌ Not authorized.")
+        await update.message.reply_text("❌ Not authorized.")
+        return
 
     if not update.message.reply_to_message:
-        return await update.message.reply_text("📢 Reply to a message to broadcast.")
+        await update.message.reply_text("📢 Reply to a message to broadcast it.")
+        return
 
     count = 0
     for uid in all_users:
@@ -95,33 +99,37 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
-        return await update.message.reply_text("❌ Not authorized.")
+        await update.message.reply_text("❌ Not authorized.")
+        return
     await update.message.reply_text(
         f"📊 Users: {len(all_users)}\nActive: {len(active_chats)}\nWaiting: {len(waiting_users)}"
     )
 
-async def forward(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# --- Message Forwarding ---
+async def forward_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     partner_id = active_chats.get(user_id)
 
     if not partner_id:
-        return await update.message.reply_text("⚠️ Use /start to match.")
+        await context.bot.send_message(chat_id=user_id, text="⚠️ Use /start to match.")
+        return
 
     if is_clean_text(update.message):
-        await context.bot.send_message(partner_id, update.message.text)
+        await context.bot.send_message(chat_id=partner_id, text=update.message.text)
     else:
-        await update.message.reply_text("🚫 Only plain text allowed.")
+        await context.bot.send_message(chat_id=user_id, text="🚫 Only plain text allowed.")
 
-# Handlers
+# --- Register Handlers ---
 telegram_app.add_handler(CommandHandler("start", start))
 telegram_app.add_handler(CommandHandler("next", next_chat))
 telegram_app.add_handler(CommandHandler("end", end_chat))
 telegram_app.add_handler(CommandHandler("broadcast", broadcast))
 telegram_app.add_handler(CommandHandler("stats", stats))
-telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, forward))
+telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, forward_message))
 
+# --- Startup & Webhook ---
 @app.on_event("startup")
-async def startup():
+async def on_startup():
     await telegram_app.initialize()
     await telegram_app.bot.set_webhook(WEBHOOK_URL)
     await telegram_app.bot.set_my_commands([
@@ -129,19 +137,20 @@ async def startup():
         BotCommand("next", "⏭️ Skip current match"),
         BotCommand("end", "❌ End chat"),
     ])
+    await telegram_app.start()
+
+@app.on_event("shutdown")
+async def on_shutdown():
+    await telegram_app.stop()
+    await telegram_app.shutdown()
 
 @app.post("/webhook")
-async def handle_webhook(request: Request):
+async def telegram_webhook(request: Request):
     data = await request.json()
     update = Update.de_json(data, telegram_app.bot)
     await telegram_app.process_update(update)
     return {"ok": True}
 
-@app.get("/")
-def read_root():
-    return {"message": "Bot is running"}
-
-# For local dev (or fallback in Render)
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=10000)
+@app.api_route("/", methods=["GET", "HEAD"])
+async def root(request: Request):
+    return JSONResponse(content={"status": "Bot is running"})
