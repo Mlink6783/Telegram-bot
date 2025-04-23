@@ -7,8 +7,8 @@ services:
     startCommand: "uvicorn main:app --host 0.0.0.0 --port 10000"
     envVars:
       - key: BOT_TOKEN
-        value: "8119276545:AAH9NkbxRoLoQaPLO0I_z0ZsxDoisRzAF_4"
+        value: 8119276545:AAH9NkbxRoLoQaPLO0I_z0ZsxDoisRzAF_4
       - key: ADMIN_ID
         value: "857216172"
       - key: WEBHOOK_URL
-        value: "https://telegram-bot-l5om.onrender.com/webhook"
+        value: https://telegram-bot-l5om.onrender.com/webhook
