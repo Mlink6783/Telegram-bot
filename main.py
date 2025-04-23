@@ -1,7 +1,7 @@
 # main.py
 import os
 import re
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from telegram import Update, BotCommand
 from telegram.ext import (
     ApplicationBuilder,
@@ -11,7 +11,6 @@ from telegram.ext import (
     filters,
     Defaults,
 )
-from telegram.ext.fastapi_handler import get_webhook_handler
 
 TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "857216172"))
@@ -29,7 +28,7 @@ telegram_app = ApplicationBuilder().token(TOKEN).defaults(defaults).build()
 
 def is_clean_text(message):
     if message.text:
-        return not re.search(r'https?://|t\.me|www\.', message.text)
+        return not re.search(r'https?://|t\\.me|www\\.', message.text)
     return False
 
 # Commands
@@ -123,6 +122,7 @@ telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, forward
 
 @app.on_event("startup")
 async def startup():
+    await telegram_app.initialize()
     await telegram_app.bot.set_webhook(WEBHOOK_URL)
     await telegram_app.bot.set_my_commands([
         BotCommand("start", "🔁 Find a match"),
@@ -130,7 +130,12 @@ async def startup():
         BotCommand("end", "❌ End chat"),
     ])
 
-app.post("/webhook")(get_webhook_handler(telegram_app))
+@app.post("/webhook")
+async def handle_webhook(request: Request):
+    data = await request.json()
+    update = Update.de_json(data, telegram_app.bot)
+    await telegram_app.process_update(update)
+    return {"ok": True}
 
 # For local dev (or fallback in Render)
 if __name__ == "__main__":
