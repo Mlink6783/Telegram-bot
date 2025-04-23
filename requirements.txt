@@ -1,0 +1,3 @@
+python-telegram-bot[fastapi]==20.6
+fastapi
+uvicorn
