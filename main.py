@@ -144,3 +144,7 @@ app = FastAPI(lifespan=lifespan)
 async def telegram_webhook(update: dict):
     await telegram_app.update_queue.put(Update.de_json(update, telegram_app.bot))
     return {"ok": True}
+
+@app.get("/")
+async def root():
+    return {"status": "Bot is running"}
