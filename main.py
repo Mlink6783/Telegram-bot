@@ -151,6 +151,13 @@ async def telegram_webhook(request: Request):
     await telegram_app.process_update(update)
     return {"ok": True}
 
-@app.api_route("/", methods=["GET", "HEAD"])
-async def root(request: Request):
-    return JSONResponse(content={"status": "Bot is running"})
+@app.api_route("/webhook", methods=["POST"])
+async def telegram_webhook(request: Request):
+    try:
+        data = await request.json()
+        update = Update.de_json(data, telegram_app.bot)
+        await telegram_app.process_update(update)
+        return JSONResponse(content={"ok": True})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
