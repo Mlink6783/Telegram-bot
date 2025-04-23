@@ -2,7 +2,7 @@ import os
 import re
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from telegram import Update, BotCommand, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from telegram import Update, BotCommand, BotCommandScopeDefault
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -10,8 +10,8 @@ from telegram.ext import (
     ContextTypes,
     filters,
     Defaults,
+    Application,
 )
-from telegram.ext import Application
 
 # --- Load ENV variables ---
 TOKEN = os.getenv("BOT_TOKEN")
@@ -27,11 +27,21 @@ app = FastAPI()
 defaults = Defaults(parse_mode="HTML")
 telegram_app: Application = ApplicationBuilder().token(TOKEN).defaults(defaults).build()
 
-# --- Helper ---
+# --- Helpers ---
 def is_clean_text(message):
     if message.text:
         return not re.search(r'https?://|t\.me|www\.', message.text)
     return False
+
+async def update_menu(user_id, in_chat=False):
+    commands = [
+        BotCommand("start", "🔁 Find a match"),
+        BotCommand("next", "⏭️ Skip current match"),
+    ]
+    if in_chat:
+        commands.append(BotCommand("end", "❌ End chat"))
+
+    await telegram_app.bot.set_my_commands(commands, scope=BotCommandScopeDefault())
 
 # --- Commands ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -39,24 +49,24 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     all_users.add(user_id)
 
     if user_id in active_chats:
-        await context.bot.send_message(chat_id=user_id, text="You are already in a chat. Use /next or /end.")
+        await context.bot.send_message(chat_id=user_id, text="⚠️ You're already in a chat. Use /next or /end.")
         return
 
     if user_id in waiting_users:
-        await context.bot.send_message(chat_id=user_id, text="⏳ Waiting for a match...", reply_markup=ReplyKeyboardRemove())
+        await context.bot.send_message(chat_id=user_id, text="⏳ Waiting for a match...")
         return
 
     if waiting_users:
         partner_id = waiting_users.pop(0)
         active_chats[user_id] = partner_id
         active_chats[partner_id] = user_id
-        keyboard = [["/next", "/end"]]
-        markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-        await context.bot.send_message(chat_id=user_id, text="🎉 Matched!", reply_markup=markup)
-        await context.bot.send_message(chat_id=partner_id, text="🎉 Matched!", reply_markup=markup)
+        await update_menu(user_id, in_chat=True)
+        await update_menu(partner_id, in_chat=True)
+        await context.bot.send_message(chat_id=user_id, text="🎉 Matched!")
+        await context.bot.send_message(chat_id=partner_id, text="🎉 Matched!")
     else:
         waiting_users.append(user_id)
-        await context.bot.send_message(chat_id=user_id, text="⏳ Waiting for a match...", reply_markup=ReplyKeyboardRemove())
+        await context.bot.send_message(chat_id=user_id, text="⏳ Waiting for a match...")
 
 async def next_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -64,11 +74,13 @@ async def next_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if partner_id:
         active_chats.pop(partner_id, None)
-        await context.bot.send_message(chat_id=partner_id, text="❌ Partner left. Use /start again.", reply_markup=ReplyKeyboardRemove())
-        await context.bot.send_message(chat_id=user_id, text="✅ Left the chat. Matching again...", reply_markup=ReplyKeyboardRemove())
+        await update_menu(user_id, in_chat=False)
+        await update_menu(partner_id, in_chat=False)
+        await context.bot.send_message(chat_id=partner_id, text="❌ Partner left. Use /start to match again.")
+        await context.bot.send_message(chat_id=user_id, text="✅ Left the chat. Finding a new match...")
         await start(update, context)
     else:
-        await context.bot.send_message(chat_id=user_id, text="⚠️ Not in a chat. Use /start.", reply_markup=ReplyKeyboardRemove())
+        await context.bot.send_message(chat_id=user_id, text="⚠️ You're not in a chat. Use /start.")
 
 async def end_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -76,10 +88,12 @@ async def end_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if partner_id:
         active_chats.pop(partner_id, None)
-        await context.bot.send_message(chat_id=partner_id, text="❌ Your partner ended the chat.", reply_markup=ReplyKeyboardRemove())
-        await context.bot.send_message(chat_id=user_id, text="✅ Chat ended. Use /start again.", reply_markup=ReplyKeyboardRemove())
+        await update_menu(user_id, in_chat=False)
+        await update_menu(partner_id, in_chat=False)
+        await context.bot.send_message(chat_id=partner_id, text="❌ Your partner ended the chat.")
+        await context.bot.send_message(chat_id=user_id, text="✅ Chat ended. Use /start again.")
     else:
-        await context.bot.send_message(chat_id=user_id, text="⚠️ Not in a chat.", reply_markup=ReplyKeyboardRemove())
+        await context.bot.send_message(chat_id=user_id, text="⚠️ You're not in a chat.")
 
 async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
@@ -97,12 +111,14 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
             count += 1
         except:
             continue
+
     await update.message.reply_text(f"✅ Broadcast sent to {count} users.")
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         await update.message.reply_text("❌ Not authorized.")
         return
+
     await update.message.reply_text(
         f"📊 Users: {len(all_users)}\nActive: {len(active_chats)}\nWaiting: {len(waiting_users)}"
     )
@@ -113,7 +129,7 @@ async def forward_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     partner_id = active_chats.get(user_id)
 
     if not partner_id:
-        await context.bot.send_message(chat_id=user_id, text="⚠️ Use /start to match.")
+        await context.bot.send_message(chat_id=user_id, text="⚠️ Use /start to find a match.")
         return
 
     if is_clean_text(update.message):
@@ -129,16 +145,12 @@ telegram_app.add_handler(CommandHandler("broadcast", broadcast))
 telegram_app.add_handler(CommandHandler("stats", stats))
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, forward_message))
 
-# --- Startup & Webhook ---
+# --- FastAPI Startup / Webhook ---
 @app.on_event("startup")
 async def on_startup():
     await telegram_app.initialize()
     await telegram_app.bot.set_webhook(WEBHOOK_URL)
-    await telegram_app.bot.set_my_commands([
-        BotCommand("start", "🔁 Find a match"),
-        BotCommand("next", "⏭️ Skip current match"),
-        BotCommand("end", "❌ End chat"),
-    ])
+    await update_menu(user_id=None, in_chat=False)  # Set global menu
     await telegram_app.start()
 
 @app.on_event("shutdown")
@@ -146,7 +158,7 @@ async def on_shutdown():
     await telegram_app.stop()
     await telegram_app.shutdown()
 
-@app.api_route("/webhook", methods=["POST"])
+@app.post("/webhook")
 async def telegram_webhook(request: Request):
     try:
         data = await request.json()
@@ -156,6 +168,6 @@ async def telegram_webhook(request: Request):
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
-@app.api_route("/", methods=["GET", "HEAD"])
-async def root(request: Request):
-    return JSONResponse(content={"status": "Bot is running"})
+@app.get("/")
+async def root():
+    return {"status": "Bot is running"}
