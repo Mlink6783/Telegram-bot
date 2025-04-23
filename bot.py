@@ -1,17 +1,32 @@
 import os
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     MessageHandler,
     ContextTypes,
     filters,
+    CallbackQueryHandler,
 )
 
 # Admin ID set here
 ADMIN_ID = 857216172  # Set your admin user ID here
 waiting_users = []
 active_chats = {}
+
+# Create Inline Keyboard for Start, Next, and End
+def get_start_keyboard():
+    keyboard = [
+        [InlineKeyboardButton("Start", callback_data='start')]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+def get_match_keyboard():
+    keyboard = [
+        [InlineKeyboardButton("Next", callback_data='next_chat')],
+        [InlineKeyboardButton("End Chat", callback_data='end_chat')]
+    ]
+    return InlineKeyboardMarkup(keyboard)
 
 # /start command handler
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -29,11 +44,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         active_chats[user_id] = partner_id
         active_chats[partner_id] = user_id
 
-        await context.bot.send_message(chat_id=user_id, text="🎉 You have a new match!")
-        await context.bot.send_message(chat_id=partner_id, text="🎉 You have a new match!")
+        await context.bot.send_message(chat_id=user_id, text="🎉 You have a new match!", reply_markup=get_match_keyboard())
+        await context.bot.send_message(chat_id=partner_id, text="🎉 You have a new match!", reply_markup=get_match_keyboard())
     else:
         waiting_users.append(user_id)
-        await context.bot.send_message(chat_id=user_id, text="⏳ Please wait while we find your match...")
+        await context.bot.send_message(chat_id=user_id, text="⏳ Please wait while we find your match...", reply_markup=get_start_keyboard())
 
 # /next command handler
 async def next_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -51,11 +66,11 @@ async def next_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
             active_chats[user_id] = new_partner_id
             active_chats[new_partner_id] = user_id
 
-            await context.bot.send_message(chat_id=user_id, text="🎉 You have a new match!")
-            await context.bot.send_message(chat_id=new_partner_id, text="🎉 You have a new match!")
+            await context.bot.send_message(chat_id=user_id, text="🎉 You have a new match!", reply_markup=get_match_keyboard())
+            await context.bot.send_message(chat_id=new_partner_id, text="🎉 You have a new match!", reply_markup=get_match_keyboard())
         else:
             waiting_users.append(user_id)
-            await context.bot.send_message(chat_id=user_id, text="⏳ Please wait while we find your match...")
+            await context.bot.send_message(chat_id=user_id, text="⏳ Please wait while we find your match...", reply_markup=get_start_keyboard())
     else:
         await context.bot.send_message(chat_id=user_id, text="⚠️ You are not in a chat. Use /start to begin.")
 
@@ -68,9 +83,9 @@ async def end_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
         active_chats.pop(partner_id, None)
 
         await context.bot.send_message(chat_id=partner_id, text="❌ Your match left the chat.")
-        await context.bot.send_message(chat_id=user_id, text="✅ You left the chat and exited the queue.")
+        await context.bot.send_message(chat_id=user_id, text="✅ You left the chat and exited the queue.", reply_markup=get_start_keyboard())
     else:
-        await context.bot.send_message(chat_id=user_id, text="⚠️ You are not in a chat. Use /start to begin.")
+        await context.bot.send_message(chat_id=user_id, text="⚠️ You are not in a chat. Use /start to begin.", reply_markup=get_start_keyboard())
 
 # Broadcast message handler for admin only
 async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -122,6 +137,18 @@ async def forward_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await context.bot.send_message(chat_id=user_id, text="⚠️ You are not in a chat. Use /start to begin.")
 
+# Callback query handler for inline buttons
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    user_id = query.from_user.id
+
+    if query.data == "start":
+        await start(update, context)
+    elif query.data == "next_chat":
+        await next_chat(update, context)
+    elif query.data == "end_chat":
+        await end_chat(update, context)
+
 # Main function to run the bot
 def main():
     TOKEN = os.getenv("BOT_TOKEN")
@@ -136,6 +163,7 @@ def main():
     app.add_handler(CommandHandler("end", end_chat))  # Register the /end command
     app.add_handler(CommandHandler("broadcast", broadcast))
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, forward_message))
+    app.add_handler(CallbackQueryHandler(button_handler))  # Handle button presses
 
     print("🤖 Bot is running...")
     app.run_polling()
