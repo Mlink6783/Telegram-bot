@@ -2,7 +2,7 @@ import os
 import re
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from telegram import Update, BotCommand
+from telegram import Update, BotCommand, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -43,18 +43,20 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if user_id in waiting_users:
-        await context.bot.send_message(chat_id=user_id, text="⏳ Waiting for a match...")
+        await context.bot.send_message(chat_id=user_id, text="⏳ Waiting for a match...", reply_markup=ReplyKeyboardRemove())
         return
 
     if waiting_users:
         partner_id = waiting_users.pop(0)
         active_chats[user_id] = partner_id
         active_chats[partner_id] = user_id
-        await context.bot.send_message(chat_id=user_id, text="🎉 Matched!")
-        await context.bot.send_message(chat_id=partner_id, text="🎉 Matched!")
+        keyboard = [["/next", "/end"]]
+        markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        await context.bot.send_message(chat_id=user_id, text="🎉 Matched!", reply_markup=markup)
+        await context.bot.send_message(chat_id=partner_id, text="🎉 Matched!", reply_markup=markup)
     else:
         waiting_users.append(user_id)
-        await context.bot.send_message(chat_id=user_id, text="⏳ Waiting for a match...")
+        await context.bot.send_message(chat_id=user_id, text="⏳ Waiting for a match...", reply_markup=ReplyKeyboardRemove())
 
 async def next_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -62,11 +64,11 @@ async def next_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if partner_id:
         active_chats.pop(partner_id, None)
-        await context.bot.send_message(chat_id=partner_id, text="❌ Partner left. Use /start again.")
-        await context.bot.send_message(chat_id=user_id, text="✅ Left the chat. Matching again...")
+        await context.bot.send_message(chat_id=partner_id, text="❌ Partner left. Use /start again.", reply_markup=ReplyKeyboardRemove())
+        await context.bot.send_message(chat_id=user_id, text="✅ Left the chat. Matching again...", reply_markup=ReplyKeyboardRemove())
         await start(update, context)
     else:
-        await context.bot.send_message(chat_id=user_id, text="⚠️ Not in a chat. Use /start.")
+        await context.bot.send_message(chat_id=user_id, text="⚠️ Not in a chat. Use /start.", reply_markup=ReplyKeyboardRemove())
 
 async def end_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -74,10 +76,10 @@ async def end_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if partner_id:
         active_chats.pop(partner_id, None)
-        await context.bot.send_message(chat_id=partner_id, text="❌ Your partner ended the chat.")
-        await context.bot.send_message(chat_id=user_id, text="✅ Chat ended. Use /start again.")
+        await context.bot.send_message(chat_id=partner_id, text="❌ Your partner ended the chat.", reply_markup=ReplyKeyboardRemove())
+        await context.bot.send_message(chat_id=user_id, text="✅ Chat ended. Use /start again.", reply_markup=ReplyKeyboardRemove())
     else:
-        await context.bot.send_message(chat_id=user_id, text="⚠️ Not in a chat.")
+        await context.bot.send_message(chat_id=user_id, text="⚠️ Not in a chat.", reply_markup=ReplyKeyboardRemove())
 
 async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
@@ -144,13 +146,6 @@ async def on_shutdown():
     await telegram_app.stop()
     await telegram_app.shutdown()
 
-@app.post("/webhook")
-async def telegram_webhook(request: Request):
-    data = await request.json()
-    update = Update.de_json(data, telegram_app.bot)
-    await telegram_app.process_update(update)
-    return {"ok": True}
-
 @app.api_route("/webhook", methods=["POST"])
 async def telegram_webhook(request: Request):
     try:
@@ -161,3 +156,6 @@ async def telegram_webhook(request: Request):
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
+@app.api_route("/", methods=["GET", "HEAD"])
+async def root(request: Request):
+    return JSONResponse(content={"status": "Bot is running"})
